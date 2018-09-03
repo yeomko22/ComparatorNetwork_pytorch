@@ -3,6 +3,7 @@
 
 import csv
 import argparse
+import os
 
 # 인물 아이디(n000002)를 신경망이 classification 하기에 용이한
 # 정수 형태의 아이디로 변환하여 매핑한 딕셔너리로 생성하여 리턴하는 함수
@@ -29,3 +30,8 @@ def get_arg_parser():
                         required=True)
 
     return parser.parse_args()
+
+# 모델을 저장할 디렉터리가 없을 경우 생성
+def checkpoint_create():
+    if not os.path.exists('../checkpoint') :
+        os.mkdir('../checkpoint')

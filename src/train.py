@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import utils
 from torch.autograd import Variable
-import argparse
 
 # 코드 실행 시 전달되는 파라미터를 파싱하는 파서 설정
 args = utils.get_arg_parser()
@@ -29,6 +28,9 @@ batch_size = 10
 
 # 얼굴 이미지에서 뽑아낼 주요 특징 부위 수 설정
 K = 12
+
+# 학습된 모델을 저장할 디렉터리 생성
+utils.checkpoint_create()
 
 # 디텍터 모델 객체 생성
 # GPU 활용을 위해 쿠다 설정
