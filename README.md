@@ -2,7 +2,7 @@
 This repo implements VGG's Comparator Network [1] using pytorch 0.4.0.  
 This is not an official one.  
 Overall architecture is below.  
-<img src="./CompNet_archi.png"></img>
+<img src="./CompNet_archi.png" width=auto height=700></img>
 
 ## Dependencies
 
