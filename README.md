@@ -26,10 +26,10 @@ Download VGGFace2 dataset [[link]](https://www.robots.ox.ac.uk/~vgg/data/vgg_fac
 `python train.py -i "path to your local VGGFace2 train img dir"`  
 
 ## Test  
-Test using VGGFace2 dataset
+Test using VGGFace2 dataset  
 `python test.py -t "path to your local VGGFace2 test img dir"`  
 
-Test using a pair of images
+Test using a pair of images  
 `python test.py -a "path to imgA" -b "path to imgB"`  
 
 ## References  
