@@ -184,6 +184,10 @@ class CustomDataset(Dataset) :
             cur_img = cv2.cvtColor(cur_img, cv2.COLOR_BGR2GRAY)
             cur_img = np.stack((cur_img,)*3, -1)
 
+        # 이미지의 각 체널에서 127.5를 빼주며, 0보다 작은 값은 0으로 치환해준다.
+        subtract_value = np.full((144, 144, 3), 127.5)
+        cur_img = (cur_img - subtract_value).clip(min=0)
+
         return cur_img
 
     # 입력 이미지의 크기를 144x144로 맞춰주는 함수

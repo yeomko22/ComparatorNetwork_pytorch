@@ -26,8 +26,22 @@ def get_arg_parser():
     parser.add_argument('-i', '--input',
                         dest="input_dir",
                         default="none",
-                        help="Directory path which contains VGGFace2 dataset train images",
-                        required=True)
+                        help="Directory path which contains VGGFace2 dataset train images")
+
+    parser.add_argument('-t', '--test',
+                        dest="test_dir",
+                        default="none",
+                        help="Directory path which contains VGGFace2 dataset test images")
+
+    parser.add_argument('-a', '--inputA',
+                        dest="input_imgA",
+                        default="none",
+                        help="imageA that conduct test")
+
+    parser.add_argument('-b', '--inputB',
+                        dest="input_imgB",
+                        default="none",
+                        help="imageB that conduct test")
 
     return parser.parse_args()
 

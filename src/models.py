@@ -1,20 +1,24 @@
+# 파일 개요 : ComparatorNetwork을 구성하는 신경망 모델이 담겨있는 파일
+#           Detector, Attender, Comparator 클래스,
+#           이들을 조합한 ComparatorNetwork 클래스가 작성되어 있다.
+
 import torch.nn as nn
 import torch
 from torch.autograd import Variable
 
 # ComparatorNetwork 모델
-# Detect, Attend, Compare 세 모듈이 합쳐진 형태로 구성되어 있다.
+# Detector, Attender, Comparator 세 부분이 합쳐진 형태로 구성되어 있다.
 class ComparatorNetwork(nn.Module):
     def __init__(self, batch_size=None, K=None):
         super(ComparatorNetwork, self).__init__()
         self.K = K
         self.batch_size = batch_size
-        self.detector = Detector(Bottleneck, [3, 4, 1], K=self.K, batch_size=self.batch_size)
+        self.detector = Detector(Bottleneck, [3, 4, 1], K=self.K, batch_size=self.batch_size, regularization='diversity')
         self.attender = Attender(K=self.K, batch_size=self.batch_size)
         self.comparator = Comparator(K=self.K, batch_size=self.batch_size)
 
-    def detect(self, input_tensor):
-        return self.detector(input_tensor)
+    def detect(self, template1, template2, class1, class2, label):
+        return self.detector(template1, template2, class1, class2, label)
 
     def attend(self, local_landmarks, global_map):
         return self.attender(local_landmarks, global_map)
@@ -22,20 +26,20 @@ class ComparatorNetwork(nn.Module):
     def compare(self, temp1_attended_vector, temp2_attended_vector):
         return self.comparator(temp1_attended_vector, temp2_attended_vector)
 
-# Detector 모듈
+# Detector
 # 기본적으로 ResNet 50의 구조를 따른다.
 # 차이점은 마지막 FC 레이어의 크기를 identity 수에 맞게 8631로 설정해준 부분과
 # 미리 설정한 K개 만큼 로컬 스코어 맵을 추출하는 부분,
 # 로컬 스코어 맵들을 max projection으로 합치는 부분,
 # 마지막 레이어 이전 feature map을 리턴하는 부분이다.
 class Detector(nn.Module):
-    def __init__(self, block, layers, num_classes=8651, K=None, batch_size=None):
+    def __init__(self, block, layers, num_classes=8651, K=None, batch_size=None, regularization=None):
+        super(Detector, self).__init__()
         self.K=K
         self.batch_size=batch_size
+        self.regularization = regularization
 
-        # --------------Detect 모듈 구성 요소--------------
         self.inplanes = 64
-        super(Detector, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
@@ -54,6 +58,10 @@ class Detector(nn.Module):
         # K 개 로컬 피쳐맵을 뽑아내기 위한 1x1 컨볼루션
         self.conv_1x1_K = nn.Conv2d(1024, self.K, kernel_size=1, stride=1, padding=0, bias=False)
 
+        # Diversity Regularizer 필요 요소들
+        self.softmax = nn.Softmax2d()
+        self.criterion = nn.CrossEntropyLoss()
+
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
@@ -71,7 +79,101 @@ class Detector(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, template1, template2, class1, class2, label):
+        # 각 템플릿 별로 안에 묶여있는 이미지들을 각각 identity classify를 진행한다.
+        # 이를 통해 1개의 이미지에서 1개의 global feature, K+1 local feature maps, classify_output을 추출한다.
+        temp1_classify_outputs = []
+        temp1_local_landmarks = []
+        temp1_K_local_maps = []
+        temp1_global_maps=[]
+
+        for img_tensor in template1:
+            img_tensor = Variable(img_tensor).cuda()
+            global_map, classify_output, local_landmarks, K_local_maps  = self.identity_classify(img_tensor)
+            temp1_classify_outputs.append(classify_output)
+            temp1_local_landmarks.append(local_landmarks)
+            temp1_K_local_maps.append(K_local_maps)
+            temp1_global_maps.append(global_map)
+
+        # 이미지 3장의 결과 행렬의 평균을 내어 최종 클래시피케이션 결과를 구한다.
+        # 이를 클레스 라벨과 비교하여 로스를 구해준다.
+        temp1_classify_avg = (temp1_classify_outputs[0]+temp1_classify_outputs[1]
+                             +temp1_classify_outputs[2])/3
+
+        loss_cls1 = self.criterion(temp1_classify_avg, class1)
+
+        # 템플릿 2에 대해서도 같은 작업을 반복해준다.
+        temp2_classify_outputs = []
+        temp2_local_landmarks = []
+        temp2_K_local_maps = []
+        temp2_global_maps = []
+        for img_tensor in template2:
+            img_tensor = Variable(img_tensor).cuda()
+            global_map, classify_output, local_landmarks, K_local_maps = self.identity_classify(img_tensor)
+            temp2_classify_outputs.append(classify_output)
+            temp2_local_landmarks.append(local_landmarks)
+            temp2_K_local_maps.append(K_local_maps)
+            temp2_global_maps.append(global_map)
+
+        temp2_classify_avg = (temp2_classify_outputs[0] + temp2_classify_outputs[1] + temp2_classify_outputs[2]) / 3
+        loss_cls2 = self.criterion(temp2_classify_avg, class2)
+
+
+        # -------------landmark regulization------------- #
+        # 논문 상에는 정규화 로스 값이 0 ~ 1 사이로 기재가 되어 있었는데
+        # 현재 구현 상으로는 -300에 가까운 숫자가 리턴되는 현상 발생
+        # 문제는 파악중이며 현재 모델 학습에는 정규화를 하지 않는다.
+
+        loss_reg = 0
+        if self.regularization=='diversity' :
+            max_projection1_array = []
+            max_projection2_array = []
+
+            for n in range(3) :
+                # 템플릿 1 정규화 로스 계산
+                # softmax normalization
+                cur_K_local_maps = temp1_K_local_maps[n]
+                cur_K_local_maps = self.softmax(cur_K_local_maps)
+
+                # max projection
+                cur_max_projection = torch.max(cur_K_local_maps, 1, False)[0]
+                cur_max_projection = torch.unsqueeze(cur_max_projection, dim=1)
+                max_projection1_array.append(cur_max_projection)
+
+                # 템플릿 2 정규화 로스 계산
+                # softmax normalization
+                cur_K_local_maps = temp2_K_local_maps[n]
+                cur_K_local_maps = self.softmax(cur_K_local_maps)
+
+                # max projection
+                cur_max_projection = torch.max(cur_K_local_maps, 1, False)[0]
+                cur_max_projection = torch.unsqueeze(cur_max_projection, dim=1)
+                max_projection2_array.append(cur_max_projection)
+
+            merged_max_map1 = torch.stack(max_projection1_array)
+            merged_max_map2 = torch.stack(max_projection2_array)
+
+            final_max_projcetion1 = torch.max(merged_max_map1, 0, False)[0]
+            final_max_projcetion2 = torch.max(merged_max_map2, 0, False)[0]
+
+            sum1 = ((final_max_projcetion1.sum(1)).sum(1)).sum(1).sum(0)
+            sum2 = ((final_max_projcetion1.sum(1)).sum(1)).sum(1).sum(0)
+
+            loss_reg1 = self.batch_size * 3 * self.K - sum1
+            loss_reg2 = self.batch_size * 3 * self.K - sum2
+
+            # 여기까지 계산한 정규화 로그 값의 범위가 비정상적으로 크므로
+            # 모델 학습에는 적용하지 않는다.
+            # loss_reg = loss_reg1 + loss_reg2
+
+        # Key point regulization 추가될 영역
+        else :
+            loss_reg=0
+
+        return temp1_local_landmarks, temp2_local_landmarks, temp1_global_maps, temp2_global_maps, loss_cls1, loss_cls2, loss_reg
+
+
+    def identity_classify(self, x):
         # input_size : [batch_size, 3, 144, 144]
         x = self.conv1(x)
         x = self.bn1(x)
@@ -85,7 +187,7 @@ class Detector(nn.Module):
         x = self.layer2(x)
         # output_size : [batch_size, 512, 18, 18]
 
-        # Attend 모듈로 넘길 피쳐맵
+        # Attender로 넘길 피쳐맵
         global_map = self.layer3(x)
         # output_size : [batch_size, 1024, 18, 18]
 
@@ -94,12 +196,12 @@ class Detector(nn.Module):
         # output_size : [batch_size, K, 18, 18]
 
         # 가장 최대 값만 뽑아낸 피쳐맵을 생성한다.
-        K_max_projection = torch.max(input=K_local_maps, dim=1, keepdim=False)[0]
-        K_max_projection = torch.unsqueeze(K_max_projection, dim=1)
+        max_projection = torch.max(K_local_maps, 1, False)[0]
+        max_projection = torch.unsqueeze(max_projection, dim=1)
         # output_size : [batch_size, 1, 18, 18]
 
         # 이를 기존 K개 피쳐맵에 덧붙여주어 K+1 차원의 로컬 랜드마크를 생성한다.
-        local_landmarks = torch.cat((K_local_maps, K_max_projection), 1)
+        local_landmarks = torch.cat((K_local_maps, max_projection), 1)
         # output_size : [batch_size, K+1, 18, 18]
 
         # 나머지 얼굴 이미지 클래시피케이션 진행
@@ -112,8 +214,9 @@ class Detector(nn.Module):
         classify_output = self.fc(x)
         # output_size : [9216, 8651]
 
-        return global_map, classify_output, local_landmarks
+        return global_map, classify_output, local_landmarks, K_local_maps
 
+# Detector가 기반으로하는 ResNet 구성 요소들
 def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
@@ -187,7 +290,7 @@ class Bottleneck(nn.Module):
 
         return out
 
-# Attender 모듈
+# Attender
 # 각 로컬 영역별 피쳐맵들에 대하여 recalibration, attion pooling을 수행한다.
 # 이는 템플릿 내에서 더 품질이 좋은 학습 이미지를 선별하는 과정에 해당한다.
 class Attender(nn.Module) :
@@ -236,7 +339,7 @@ class Attender(nn.Module) :
         result_tensor =  torch.stack(batch_tensor_list)
         return result_tensor
 
-# Compare 모듈
+# Comparator
 # 템플릿 별로 추출한 벡터들을 주요 영역별로 합쳐준다.
 # 또한 어느 부위를 나타내는지 표시하는 one-hot 벡터도 이어준다.
 # 이를 각 영역별 fc, maxpool, 마지막 fc를 통과시킨다.
