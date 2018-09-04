@@ -1,8 +1,7 @@
 # ComparatorNetwork_PyTorch
-This repo implements VGG's Comparator Network [1] using pytorch 0.4.0.  
-This is not an official one.  
+This is an unofficial implementation of VGG's Comparator Network [1] using PyTorch.    
 Overall architecture is below.  
-<img src="./CompNet_archi.png"></img>
+<img src="./CompNet_archi.png" width=auto height=700></img>
 
 ## Dependencies
 
@@ -14,12 +13,11 @@ Overall architecture is below.
 - Basic architecture of detect, attend and compare module.
 - Model train and test code.
 - Diversity Regularization of local landmarks.
-- Hard sampling.
 
 ## Currently ongoing part
 - Using pretrained ResNet, SENet model in detect process.
 - Keypoint Regularization of local landmarks.
-- IARPA Janus benchmark test.
+- Hard sampling
 
 ## Dataset  
 Download VGGFace2 dataset [[link]](https://www.robots.ox.ac.uk/~vgg/data/vgg_face2/)  
@@ -28,6 +26,10 @@ Download VGGFace2 dataset [[link]](https://www.robots.ox.ac.uk/~vgg/data/vgg_fac
 `python train.py -i "path to your local VGGFace2 train img dir"`  
 
 ## Test  
+Test using VGGFace2 dataset  
+`python test.py -t "path to your local VGGFace2 test img dir"`  
+
+Test using a pair of images  
 `python test.py -a "path to imgA" -b "path to imgB"`  
 
 ## References  
