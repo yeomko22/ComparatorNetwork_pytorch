@@ -48,7 +48,6 @@ class CustomDataset(Dataset) :
         # positive 템플릿을 생성할 것인지, negative 템플릿을 생성할 지 결정한다.
         # 0 이면 서로 다른 인물, 1 이면 동일한 인물로 두 쌍의 템플릿을 구성한다.
         label = random.randint(0,1)
-        # label = 1
 
         template1 = set()
         template2 = set()
