@@ -18,14 +18,21 @@ import pandas as pd
 import time
 
 class CustomDataset(Dataset) :
-    def __init__(self, train_dir=None):
+    def __init__(self, train_dir=None, test_dir=None):
         self.label_path = '../labels/'
         self.identity_train = self.label_path+'identity_train.csv'
+        self.identity_test = self.label_path+'identity_test.csv'
+
         self.id_label_dict = utils.get_id_label_map(self.identity_train)
 
-        # 학습용 데이터 셋 경로 지정
-        self.img_label = pd.read_csv(self.identity_train, delimiter=',')
-        self.img_dir = train_dir
+        if train_dir is not None :
+            # 학습용 데이터 셋 경로 지정
+            self.img_label = pd.read_csv(self.identity_train, delimiter=',')
+            self.img_dir = train_dir
+        else :
+            # 테스트용 데이터 셋 경로 지정
+            self.img_label = pd.read_csv(self.identity_test, delimiter=',')
+            self.img_dir = test_dir
 
         # 모션 블러 적용 시에 필요한 필터 생성
         self.motion_filter_size = 15
@@ -40,123 +47,74 @@ class CustomDataset(Dataset) :
     def __getitem__(self, index):
         # positive 템플릿을 생성할 것인지, negative 템플릿을 생성할 지 결정한다.
         # 0 이면 서로 다른 인물, 1 이면 동일한 인물로 두 쌍의 템플릿을 구성한다.
-        # label = random.randint(0,1)
-        label=0
+        label = random.randint(0,1)
+        # label = 1
 
         template1 = set()
         template2 = set()
 
+        identity_one = self.img_label.iloc[index, 0]
+        identity_two = ''
+
         # 서로 다른 인물로 구성된 템플릿 생성
         if label == 0:
-            cur_identity = self.img_label.iloc[index, 0]
-
             # 현재 인물과 다른 인물을 랜덤하게 선택
             # 추후에 여기 부분에 hard sampling 부분을 추가할 것
             while True :
                 other_identity_index = random.randint(0, len(self.img_label)-1)
                 if other_identity_index != index :
                     break
-            other_identity = self.img_label.iloc[other_identity_index, 0]
+            identity_two = self.img_label.iloc[other_identity_index, 0]
 
-            # 현재 인물과 다른 인물의 클래스 값을 가져온다.
-            class1 = self.id_label_dict.get(cur_identity)
-            class2 = self.id_label_dict.get(other_identity)
+        # 동일인으로 구성된 템플릿 생성
+        else :
+            identity_two = identity_one
 
-            # 현재 인물과 다른 인물의 이미지가 저장된 폴더를 설정한 뒤, 이미지 목록을 가져온다.
-            cur_img_dir = self.img_dir+cur_identity+'/'
-            cur_img_list = os.listdir(cur_img_dir)
-            other_img_dir = self.img_dir+other_identity+'/'
-            other_img_list = os.listdir(other_img_dir)
+        # 현재 인물의 클래스 값을 가져온다.
+        class1 = self.id_label_dict.get(identity_one)
+        class2 = self.id_label_dict.get(identity_two)
 
-            # 현재 인물의 이미지 3장을 읽어와 텐서형식으로 변환한 다음, template1 안에 추가
-            while len(template1) < 3 :
-                # 이미지를 읽어와 데이터 어그멘테이션 적용
-                cur_img_path = cur_img_dir+cur_img_list[random.randint(1, len(cur_img_list)-1)]
-                cur_img = cv2.imread(cur_img_path)
-                cur_img = self.transform_img(cur_img)
+        # 현재 인물과 다른 인물의 이미지가 저장된 폴더를 설정한 뒤, 이미지 목록을 가져온다.
+        cur_img_dir = self.img_dir+identity_one+'/'
+        cur_img_list = os.listdir(cur_img_dir)
+        other_img_dir = self.img_dir+identity_two+'/'
+        other_img_list = os.listdir(other_img_dir)
 
-                # 이미지를 텐서 형식으로 변한한 뒤 템플릿에 저장
-                cur_img = cur_img.transpose((2, 0, 1))
-                cur_img = torch.from_numpy(np.flip(cur_img, axis=0).copy()).float()
-                template1.add(cur_img)
+        # identity1 인물의 이미지 3장을 읽어와 텐서형식으로 변환한 다음, template1 안에 추가
+        while len(template1) < 3 :
+            # 이미지를 읽어와 데이터 어그멘테이션 적용
+            cur_img_path = cur_img_dir+cur_img_list[random.randint(1, len(cur_img_list)-1)]
+            cur_img = cv2.imread(cur_img_path)
+            cur_img = self.transform_img(cur_img)
 
-            # 다른 인물의 이미지 3장을 읽어와 텐서형식으로 변환한 다음, template2 안에 추가
-            while len(template2) < 3 :
-                # 이미지를 읽어와 데이터 어그멘테이션 적용
-                cur_img_path=other_img_dir + other_img_list[random.randint(1, len(other_img_list) - 1)]
-                cur_img = cv2.imread(cur_img_path)
-                cur_img = self.transform_img(cur_img)
+            # 이미지를 텐서 형식으로 변한한 뒤 템플릿에 저장
+            cur_img = cur_img.transpose((2, 0, 1))
+            cur_img = torch.from_numpy(np.flip(cur_img, axis=0).copy()).float()
+            template1.add(cur_img)
 
-                # 이미지를 텐서 형식으로 변한한 뒤 템플릿에 저장
-                cur_img = cur_img.transpose((2, 0, 1))
-                cur_img = torch.from_numpy(np.flip(cur_img, axis=0).copy()).float()
+        # identity2 인물의 이미지 3장을 읽어와 텐서형식으로 변환한 다음, template2 안에 추가
+        while len(template2) < 3 :
+            # 이미지를 읽어와 데이터 어그멘테이션 적용
+            cur_img_path=other_img_dir + other_img_list[random.randint(1, len(other_img_list) - 1)]
+            cur_img = cv2.imread(cur_img_path)
+            cur_img = self.transform_img(cur_img)
 
-                template2.add(cur_img)
+            # 이미지를 텐서 형식으로 변한한 뒤 템플릿에 저장
+            cur_img = cur_img.transpose((2, 0, 1))
+            cur_img = torch.from_numpy(np.flip(cur_img, axis=0).copy()).float()
 
-            template1 = list(template1)
-            template2 = list(template2)
+            template2.add(cur_img)
 
-            # 각 클래스 값을 텐서 형식으로 변환해준다.
-            class1 = torch.LongTensor(np.array([class1], dtype=np.int64))
-            class2 = torch.LongTensor(np.array([class2], dtype=np.int64))
+        template1 = list(template1)
+        template2 = list(template2)
 
-            # 라벨 값을 텐서 형식으로 변환해준다.
-            label = torch.LongTensor(np.array([label], dtype=np.int64))
+        # 라벨 값을 텐서 형식으로 변환해준다.
+        label = torch.LongTensor(np.array([label], dtype=np.int64))
 
-            # 템플릿 두 개, 각 템플릿 별 클래스, 전체 라벨을 하나의 샘플로 묶어서 리턴한다.
-            sample = {"template1": template1, "template2": template2, "class1": class1, "class2": class2,
+        # 템플릿 두 개, 각 템플릿 별 클래스, 전체 라벨을 하나의 샘플로 묶어서 리턴한다.
+        sample = {"template1": template1, "template2": template2, "class1": class1, "class2": class2,
                       "label": label}
-            return sample
-
-        # 같은 인물로 구성된 템플릿 생성
-        else:
-            cur_identity = self.img_label.iloc[index, 0]
-
-            # 현재 인물의 클래스 값을 가져온다.
-            class1 = self.id_label_dict.get(cur_identity)
-            class2 = class1
-
-            # 현재 인물의 이미지가 저장된 폴더를 설정한 뒤, 이미지 목록을 가져온다.
-            cur_img_dir = self.img_dir + cur_identity + '/'
-            cur_img_list = os.listdir(cur_img_dir)
-
-            # 두 개의 템플릿에 들어갈 이미지 목록을 저장할 셋을 만든다.
-            # 셋을 만든 이유는 템플릿에 중복된 이미지가 저장되는 것을 막기 위함이다.
-            total_set = set()
-
-            # 현재 인물의 이미지 3장을 읽어와 텐서형식으로 변환한 다음, template1 안에 추가
-            # 그 다음에는 이미지 3장을 더 읽어와 template2 안에 추가
-            while len(total_set) < 6 :
-                # 이미지를 읽어와 데이터 어그멘테이션 적용
-                cur_img_path = cur_img_dir + cur_img_list[random.randint(1, len(cur_img_list) - 1)]
-                cur_img = cv2.imread(cur_img_path)
-                cur_img = self.transform_img(cur_img)
-
-                # 이미지를 텐서 형식으로 변한한 뒤 템플릿에 저장
-                cur_img = cur_img.transpose((2, 0, 1))
-                cur_img = torch.from_numpy(np.flip(cur_img, axis=0).copy())
-
-                total_set.add(cur_img)
-                if len(total_set) < 3:
-                    template1.add(cur_img)
-                else:
-                    template2.add(cur_img)
-
-            template1 = tuple(template1)
-            template2 = tuple(template2)
-
-            # 각 클래스 값을 텐서 형식으로 변환해준다.
-            class1 = torch.LongTensor(np.array([class1], dtype=np.int64))
-            class2 = torch.LongTensor(np.array([class2], dtype=np.int64))
-
-            # 라벨 값을 텐서 형식으로 변환해준다.
-            label = torch.LongTensor(np.array([label], dtype=np.int64))
-
-            # 템플릿 두 개, 각 템플릿 별 클래스, 전체 라벨을 하나의 샘플로 묶어서 리턴한다.
-            sample = {"template1": template1, "template2": template2, "class1": class1, "class2": class2,
-                      "label": label}
-
-            return sample
+        return sample
 
     def __len__(self):
         return len(self.img_label)

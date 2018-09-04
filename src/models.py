@@ -17,14 +17,24 @@ class ComparatorNetwork(nn.Module):
         self.attender = Attender(K=self.K, batch_size=self.batch_size)
         self.comparator = Comparator(K=self.K, batch_size=self.batch_size)
 
-    def detect(self, template1, template2, class1, class2, label):
-        return self.detector(template1, template2, class1, class2, label)
+    def detect(self, template1, template2, class1, class2, label, isTest):
+        return self.detector(template1, template2, class1, class2, label, isTest)
 
-    def attend(self, local_landmarks, global_map):
+    def attend(self, local_landmarks, global_map, isTest):
         return self.attender(local_landmarks, global_map)
 
-    def compare(self, temp1_attended_vector, temp2_attended_vector):
+    def compare(self, temp1_attended_vector, temp2_attended_vector, isTest):
         return self.comparator(temp1_attended_vector, temp2_attended_vector)
+
+    def test(self, template1, template2, label):
+        label = Variable(label).cuda()
+        temp1_local_landmarks, temp2_local_landmarks, temp1_global_maps, temp2_global_maps, loss_cls1, loss_cls2, loss_reg = self.detect(template1, template2, 0, 0, label, isTest=True)
+
+        temp1_attended_vector = self.attend(temp1_local_landmarks, temp1_global_maps, isTest=True)
+        temp2_attended_vector = self.attend(temp2_local_landmarks, temp2_global_maps, isTest=True)
+
+        similarity_vector = self.compare(temp1_attended_vector, temp2_attended_vector, isTest=True)
+        return similarity_vector
 
 # Detector
 # 기본적으로 ResNet 50의 구조를 따른다.
@@ -79,7 +89,7 @@ class Detector(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, template1, template2, class1, class2, label):
+    def forward(self, template1, template2, class1, class2, label, isTest=None):
         # 각 템플릿 별로 안에 묶여있는 이미지들을 각각 identity classify를 진행한다.
         # 이를 통해 1개의 이미지에서 1개의 global feature, K+1 local feature maps, classify_output을 추출한다.
         temp1_classify_outputs = []
@@ -100,8 +110,6 @@ class Detector(nn.Module):
         temp1_classify_avg = (temp1_classify_outputs[0]+temp1_classify_outputs[1]
                              +temp1_classify_outputs[2])/3
 
-        loss_cls1 = self.criterion(temp1_classify_avg, class1)
-
         # 템플릿 2에 대해서도 같은 작업을 반복해준다.
         temp2_classify_outputs = []
         temp2_local_landmarks = []
@@ -116,8 +124,14 @@ class Detector(nn.Module):
             temp2_global_maps.append(global_map)
 
         temp2_classify_avg = (temp2_classify_outputs[0] + temp2_classify_outputs[1] + temp2_classify_outputs[2]) / 3
-        loss_cls2 = self.criterion(temp2_classify_avg, class2)
 
+        if isTest==True :
+            loss_cls1 = 0
+            loss_cls2 = 0
+
+        else :
+            loss_cls1 = self.criterion(temp1_classify_avg, class1)
+            loss_cls2 = self.criterion(temp2_classify_avg, class2)
 
         # -------------landmark regulization------------- #
         # 논문 상에는 정규화 로스 값이 0 ~ 1 사이로 기재가 되어 있었는데

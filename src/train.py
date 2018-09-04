@@ -86,14 +86,14 @@ for epoch in range(num_epochs):
 
         # ---------- Detect 과정 ---------- #
         temp1_local_landmarks, temp2_local_landmarks, temp1_global_maps, temp2_global_maps, loss_cls1, loss_cls2, loss_reg \
-            = comparator_network.detect(template1, template2, class1, class2, label)
+            = comparator_network.detect(template1, template2, class1, class2, label, isTest=False)
 
         # ---------- Attend 과정 ---------- #
-        temp1_attended_vector = comparator_network.attend(temp1_local_landmarks, temp1_global_maps)
-        temp2_attended_vector = comparator_network.attend(temp2_local_landmarks, temp2_global_maps)
+        temp1_attended_vector = comparator_network.attend(temp1_local_landmarks, temp1_global_maps, isTest=False)
+        temp2_attended_vector = comparator_network.attend(temp2_local_landmarks, temp2_global_maps, isTest=False)
 
         # ---------- Compare 과정 ---------- #
-        similarity_vector = comparator_network.compare(temp1_attended_vector, temp2_attended_vector)
+        similarity_vector = comparator_network.compare(temp1_attended_vector, temp2_attended_vector, isTest=False)
         loss_sim = criterion(similarity_vector, label)
 
         # 클래시피케이션 로스, 유사도 측정 로스, 정규화 로스를 합쳐 전체 로스를 구한다.
@@ -108,6 +108,7 @@ for epoch in range(num_epochs):
     # 매 60000 iteration 마다 a3 절반으로 감소
     if iter_count == 60000:
         a3 *= 0.5
+        iter_count = 0
 
     # 매 에포크마다 모델 저장
     torch.save(comparator_network.state_dict(), '../checkpoint/comparator_netork.pkl')
